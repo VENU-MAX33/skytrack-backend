@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Build output
+dist/
+build/
+
+# Local databases and runtime data
+.local-mongodb/
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs and temporary files
+*.log
+npm-debug.log*
+*.tmp
+*.temp
+*.swp
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
