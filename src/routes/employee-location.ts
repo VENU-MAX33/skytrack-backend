@@ -14,7 +14,16 @@ employeeLocationRouter.get(
   '/requests',
   asyncHandler(async (req, res) => {
     const employeeId = new Types.ObjectId(req.auth!.sub);
-    const docs = await LocationRequest.find({ employeeId, status: 'pending' })
+    const now = new Date();
+    await LocationRequest.updateMany(
+      { employeeId, status: 'pending', expiresAt: { $lte: now } },
+      { $set: { status: 'expired' } }
+    );
+    const docs = await LocationRequest.find({
+      employeeId,
+      status: 'pending',
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+    })
       .sort({ requestedAt: -1 }).limit(20).populate('driverId tripId');
     res.json(docs.map((doc) => ({
       id: doc._id.toString(),
@@ -29,7 +38,12 @@ employeeLocationRouter.get(
 employeeLocationRouter.post(
   '/',
   asyncHandler(async (req, res) => {
-    const { tripId, lat, lng } = req.body as { tripId?: string; lat?: number; lng?: number };
+    const { requestId, tripId, lat, lng } = req.body as {
+      requestId?: string;
+      tripId?: string;
+      lat?: number;
+      lng?: number;
+    };
     if (!tripId || lat == null || lng == null) {
       throw new HttpError(400, 'tripId, lat and lng are required');
     }
@@ -45,25 +59,52 @@ employeeLocationRouter.post(
     const employee = await Employee.findById(selfObjectId);
     if (!employee) throw new HttpError(404, 'Employee not found');
 
-    const trip = await Trip.findOne({ tripId, employeeIds: selfObjectId });
+    let requestDoc = null;
+    if (requestId) {
+      if (!Types.ObjectId.isValid(requestId)) throw new HttpError(400, 'Invalid location request id');
+      requestDoc = await LocationRequest.findOne({
+        _id: requestId,
+        employeeId: selfObjectId,
+        status: 'pending',
+      });
+      if (!requestDoc) throw new HttpError(404, 'Location request was not found or has already been answered');
+      if (requestDoc.expiresAt && requestDoc.expiresAt.getTime() <= Date.now()) {
+        requestDoc.status = 'expired';
+        await requestDoc.save();
+        throw new HttpError(409, 'This location request has expired');
+      }
+    }
+
+    const trip = requestDoc
+      ? await Trip.findOne({ _id: requestDoc.tripId, tripId, employeeIds: selfObjectId })
+      : await Trip.findOne({ tripId, employeeIds: selfObjectId });
     if (!trip) throw new HttpError(404, 'Trip not found or you are not on this trip');
+    if (trip.completedAt || ['Completed', 'Completed Late', 'Auto Cancelled'].includes(trip.status)) {
+      throw new HttpError(409, 'Location cannot be shared for a completed trip');
+    }
+
+    const sharedAt = new Date();
 
     emitEmployeeLocation({
+      requestId: requestDoc?._id.toString(),
       employeeMongoId: selfObjectId.toString(),
       empId: employee.empId,
       empName: employee.name,
       tripId,
       lat,
       lng,
-      timestamp: new Date().toISOString(),
+      timestamp: sharedAt.toISOString(),
       driverMongoId: trip.driverId?.toString(),
     });
 
-    await LocationRequest.updateMany(
-      { tripId: trip._id, employeeId: selfObjectId, status: 'pending' },
-      { $set: { status: 'shared', sharedAt: new Date() } }
-    );
+    if (requestDoc) {
+      requestDoc.status = 'shared';
+      requestDoc.sharedAt = sharedAt;
+      requestDoc.sharedLat = lat;
+      requestDoc.sharedLng = lng;
+      await requestDoc.save();
+    }
 
-    res.json({ ok: true });
+    res.json({ ok: true, requestId: requestDoc?._id.toString() ?? null, sharedAt: sharedAt.toISOString() });
   })
 );

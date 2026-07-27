@@ -120,6 +120,7 @@ tripsRouter.post(
       vehicleNo?: string;
       routeName?: string;
       employeeIds?: string[];
+      scheduleStops?: { employeeId: string; reachTime: string }[];
       status?: string;
     };
     if (!body.type || !body.vehicleNo) throw new HttpError(400, 'type and vehicleNo are required');
@@ -143,6 +144,33 @@ tripsRouter.post(
 
     const date = body.date ?? localToday();
     const tripId = await nextTripId(date);
+    let scheduleStops: {
+      employeeId: typeof employees[number]['_id'];
+      sequence: number;
+      plannedAt: Date;
+      distanceMeters: number;
+      durationSeconds: number;
+    }[] = [];
+    if (body.scheduleStops?.length) {
+      const employeeById = new Map(employees.map((employee) => [employee.empId, employee]));
+      const submitted = new Set<string>();
+      scheduleStops = body.scheduleStops.map((stop, index) => {
+        const employee = employeeById.get(String(stop.employeeId ?? '').trim());
+        if (!employee) throw new HttpError(400, `Employee ${stop.employeeId} is not assigned to this trip`);
+        if (submitted.has(employee.empId)) throw new HttpError(400, `Duplicate employee ${employee.empId}`);
+        submitted.add(employee.empId);
+        return {
+          employeeId: employee._id,
+          sequence: index + 1,
+          plannedAt: reachTimeOnTripDate(date, stop.reachTime),
+          distanceMeters: 0,
+          durationSeconds: 0,
+        };
+      });
+      if (submitted.size !== employees.length) {
+        throw new HttpError(400, 'Enter a driver reach time for every employee');
+      }
+    }
 
     const doc = await Trip.create({
       tripId,
@@ -157,6 +185,12 @@ tripsRouter.post(
       employeeIds: employees.map((e) => e._id),
       vendor: vehicle.vendor,
       location: route.name,
+      scheduleStops,
+      ...(scheduleStops.length ? {
+        scheduleMode: 'manual',
+        scheduleCalculatedAt: new Date(),
+        etaUpdatedAt: new Date(),
+      } : {}),
     });
     const created = await Trip.findOne({ tripId }).populate(TRIP_POPULATE);
     res.status(201).json(toTripDTO(created as unknown as Populated));
@@ -315,7 +349,9 @@ tripsRouter.put(
 tripsRouter.put(
   '/:id/schedule',
   asyncHandler(async (req, res) => {
-    if (!['admin', 'platform-owner'].includes(req.auth?.role ?? '')) throw new HttpError(403, 'Only an administrator can edit schedules');
+    if (!['admin', 'staff', 'platform-owner'].includes(req.auth?.role ?? '')) {
+      throw new HttpError(403, 'Only an administrator or staff member can edit schedules');
+    }
     const doc = await Trip.findOne({ tripId: req.params.id }).populate(TRIP_POPULATE);
     if (!doc) throw new HttpError(404, 'Trip not found');
     const populated = doc as unknown as Populated;
@@ -362,6 +398,9 @@ tripsRouter.put(
     if (doc.frozen) {
       await doc.populate(TRIP_POPULATE);
       return res.json(toTripDTO(doc as unknown as Populated));
+    }
+    if (doc.scheduleStops.length !== doc.employeeIds.length) {
+      throw new HttpError(422, 'Enter driver reach times for all employees before locking the trip');
     }
     doc.frozen = true;
     await doc.save();

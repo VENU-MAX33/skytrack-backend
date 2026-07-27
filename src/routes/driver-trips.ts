@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Types } from 'mongoose';
 import { Trip } from '../models/Trip.js';
 import { toDriverTripDTO } from '../mappers.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
@@ -17,6 +18,7 @@ const TRIP_POPULATE = 'vehicleId driverId routeId employeeIds';
 type PopulatedTrip = Parameters<typeof toDriverTripDTO>[0];
 const ONGOING_STATUSES = ['Trip Started', 'Pickup Started', 'Drop Started'];
 const LOCATION_REQUEST_COOLDOWN_MS = 5 * 60 * 1000;
+const LOCATION_REQUEST_TTL_MS = 30 * 60 * 1000;
 
 function reportDate(value: unknown): string {
   const date = String(value ?? localToday());
@@ -69,6 +71,51 @@ driverTripsRouter.get(
       .sort({ date: 1, shiftTime: 1 })
       .populate(TRIP_POPULATE);
     res.json(docs.map((d) => toDriverTripDTO(d as unknown as PopulatedTrip)));
+  })
+);
+
+// GET /api/driver/trips/location-responses — durable employee responses that
+// may have arrived while the driver's app was offline.
+driverTripsRouter.get(
+  '/location-responses',
+  asyncHandler(async (req, res) => {
+    const tripId = typeof req.query.tripId === 'string' ? req.query.tripId : '';
+    const trip = tripId ? await Trip.findOne({ tripId, driverId: req.auth!.sub }).select('_id') : null;
+    if (tripId && !trip) throw new HttpError(404, 'Trip not found');
+    const docs = await LocationRequest.find({
+      driverId: req.auth!.sub,
+      status: 'shared',
+      sharedLat: { $ne: null },
+      sharedLng: { $ne: null },
+      ...(trip ? { tripId: trip._id } : { driverViewedAt: null }),
+    })
+      .sort({ sharedAt: -1 })
+      .limit(20)
+      .populate('employeeId tripId');
+    res.json(docs.map((doc) => ({
+      requestId: doc._id.toString(),
+      tripId: (doc.tripId as unknown as { tripId?: string }).tripId ?? '',
+      employeeMongoId: (doc.employeeId as unknown as { _id?: { toString(): string } })._id?.toString() ?? '',
+      empId: (doc.employeeId as unknown as { empId?: string }).empId ?? '',
+      empName: (doc.employeeId as unknown as { name?: string }).name ?? 'Employee',
+      lat: doc.sharedLat,
+      lng: doc.sharedLng,
+      timestamp: doc.sharedAt?.toISOString() ?? doc.requestedAt.toISOString(),
+    })));
+  })
+);
+
+driverTripsRouter.put(
+  '/location-responses/:requestId/read',
+  asyncHandler(async (req, res) => {
+    if (!Types.ObjectId.isValid(req.params.requestId)) throw new HttpError(400, 'Invalid location request id');
+    const updated = await LocationRequest.findOneAndUpdate(
+      { _id: req.params.requestId, driverId: req.auth!.sub, status: 'shared' },
+      { $set: { driverViewedAt: new Date() } },
+      { new: true }
+    );
+    if (!updated) throw new HttpError(404, 'Location response not found');
+    res.json({ ok: true });
   })
 );
 
@@ -181,7 +228,15 @@ driverTripsRouter.post(
       throw new HttpError(429, 'A location request was already sent recently. Please wait five minutes.');
     }
 
-    const request = await LocationRequest.create({ tripId: trip._id, driverId: driver._id, employeeId: employee._id, status: 'pending' });
+    const requestedAt = new Date();
+    const request = await LocationRequest.create({
+      tripId: trip._id,
+      driverId: driver._id,
+      employeeId: employee._id,
+      status: 'pending',
+      requestedAt,
+      expiresAt: new Date(requestedAt.getTime() + LOCATION_REQUEST_TTL_MS),
+    });
     const body = [
       `${driver.name || 'Your driver'} requested your current location`,
       `Trip: ${trip.tripId} | Route: ${trip.routeId?.name || trip.location || 'Not set'}`,

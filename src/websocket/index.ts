@@ -145,6 +145,7 @@ export function emitEscortReportAck(payload: { report: unknown; driverId?: strin
 
 /** Broadcast an employee's live GPS location to their trip's driver and to admins. */
 export function emitEmployeeLocation(payload: {
+  requestId?: string;
   employeeMongoId: string;
   empId: string;
   empName: string;

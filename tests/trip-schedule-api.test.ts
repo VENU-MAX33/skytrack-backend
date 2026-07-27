@@ -70,8 +70,60 @@ test('admin can save a time-only employee reach schedule', async () => {
   assert.equal(manual.body.schedule.stops[0].plannedAt, '2026-07-17T02:45:00.000Z');
 });
 
-test('trip locks and publishes without manual employee reach times', async () => {
+test('staff can save employee reach times', async () => {
+  const { trip } = await setupScheduledTrip();
+  const staff = await makeAdmin('staff');
+  const token = tokenFor(staff._id.toString(), 'staff');
+  const manual = await request(app)
+    .put(`/api/trips/${trip.id}/schedule`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ stops: [{ employeeId: 'EMP100', reachTime: '08:20' }] });
+  assert.equal(manual.status, 200);
+  assert.equal(manual.body.schedule.stops[0].plannedAt, '2026-07-17T02:50:00.000Z');
+});
+
+test('trip creation accepts reach times entered before vehicle selection', async () => {
+  const admin = await makeAdmin('admin');
+  const token = tokenFor(admin._id.toString(), 'admin');
+  const driver = await makeDriver();
+  await Route.create({ routeId: 2, name: 'North Route', type: 'Both' });
+  await Vehicle.create({
+    rtoNo: 'KA01MX2000',
+    vendor: 'Monitor Cabs',
+    driverId: driver._id,
+    active: 'Yes',
+  });
+  await makeEmployee({ empId: 'EMP200', route: 'North Route' });
+  const created = await request(app)
+    .post('/api/trips')
+    .set('Authorization', `Bearer ${token}`)
+    .set('Idempotency-Key', crypto.randomUUID())
+    .send({
+      type: 'PickUp',
+      date: '2026-07-17',
+      shiftTime: '09:00',
+      vehicleNo: 'KA01MX2000',
+      routeName: 'North Route',
+      employeeIds: ['EMP200'],
+      scheduleStops: [{ employeeId: 'EMP200', reachTime: '08:10' }],
+    });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.schedule.mode, 'manual');
+  assert.equal(created.body.schedule.stops[0].plannedAt, '2026-07-17T02:40:00.000Z');
+});
+
+test('trip cannot lock until every employee reach time has been entered', async () => {
   const { token, trip } = await setupScheduledTrip();
+  const blocked = await request(app)
+    .put(`/api/trips/${trip.id}/freeze`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({});
+  assert.equal(blocked.status, 422);
+
+  await request(app)
+    .put(`/api/trips/${trip.id}/schedule`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ stops: [{ employeeId: 'EMP100', reachTime: '08:15' }] });
   const frozen = await request(app)
     .put(`/api/trips/${trip.id}/freeze`)
     .set('Authorization', `Bearer ${token}`)
