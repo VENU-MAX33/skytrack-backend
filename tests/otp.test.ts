@@ -39,7 +39,7 @@ test('employee request-otp does not leak the OTP code in the response', async ()
   assert.ok(!('code' in res.body), 'response must not contain code');
 });
 
-test('driver verify-otp still issues a token for a valid code', async () => {
+test('driver valid OTP can be exchanged for a company-scoped token', async () => {
   const driver = await makeDriver({ contact: '9845000999' });
   // Seed a known OTP the way sendOtp would (hashed, unconsumed, not expired).
   await OTP.create({
@@ -55,8 +55,15 @@ test('driver verify-otp still issues a token for a valid code', async () => {
     .send({ phone: driver.contact, code: '654321' });
 
   assert.equal(res.status, 200);
-  assert.ok(typeof res.body.token === 'string' && res.body.token.length > 0);
-  assert.equal(res.body.user.role, 'driver');
+  assert.ok(typeof res.body.selectionToken === 'string' && res.body.selectionToken.length > 0);
+  assert.equal(res.body.companies.length, 1);
+
+  const selected = await request(app)
+    .post('/api/driver/select-company')
+    .send({ selectionToken: res.body.selectionToken, companyId: res.body.companies[0].id });
+  assert.equal(selected.status, 200);
+  assert.ok(typeof selected.body.token === 'string' && selected.body.token.length > 0);
+  assert.equal(selected.body.user.role, 'driver');
 });
 
 test('driver verify-otp rejects an incorrect code', async () => {

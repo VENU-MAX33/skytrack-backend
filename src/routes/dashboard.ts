@@ -38,7 +38,7 @@ dashboardRouter.get(
         { $group: { _id: '$type', emps: { $sum: { $size: '$employeeIds' } }, trips: { $sum: 1 } } },
       ]),
       Trip.aggregate<{ _id: string; n: number }>([
-        { $match: { date: today } },
+        { $match: { $or: [{ date: today }, { status: { $in: STATUS_BUCKETS['in-progress'] } }] } },
         { $group: { _id: '$status', n: { $sum: 1 } } },
       ]),
       Trip.aggregate<{ _id: string; tripCount: number; completed: number }>([
@@ -68,7 +68,11 @@ dashboardRouter.get(
       STATUS_BUCKETS[bucket].reduce((sum, s) => sum + (statusByName[s] ?? 0), 0);
 
     const tableFor = async (bucket: string): Promise<TripTableRow[]> => {
-      const docs = await Trip.find({ date: today, status: { $in: STATUS_BUCKETS[bucket] } })
+      const status = { $in: STATUS_BUCKETS[bucket] };
+      const query = bucket === 'in-progress'
+        ? { status }
+        : { date: today, status };
+      const docs = await Trip.find(query)
         .limit(6)
         .populate(TRIP_POPULATE);
       return docs.map((d) => toTableRow(d as unknown as PopulatedTrip));

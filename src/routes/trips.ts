@@ -62,16 +62,26 @@ async function nextTripId(date: string): Promise<string> {
 tripsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const { fromDate, toDate, shiftTime, tripType, vendor, search, status } = req.query as Record<
+    const { fromDate, toDate, shiftTime, tripType, vendor, search, status, includeOngoing } = req.query as Record<
       string,
       string | undefined
     >;
 
     const query: FilterQuery<TripDoc> = {};
     if (fromDate || toDate) {
-      query.date = {};
-      if (fromDate) query.date.$gte = fromDate;
-      if (toDate) query.date.$lte = toDate;
+      const dateRange: Record<string, string> = {};
+      if (fromDate) dateRange.$gte = fromDate;
+      if (toDate) dateRange.$lte = toDate;
+      if (includeOngoing === 'true') {
+        query.$and = [{
+          $or: [
+            { date: dateRange },
+            { status: { $in: STATUS_BUCKETS['in-progress'] }, completedAt: null },
+          ],
+        }];
+      } else {
+        query.date = dateRange;
+      }
     }
     if (shiftTime) query.shiftTime = shiftTime;
     if (tripType) {
@@ -398,9 +408,6 @@ tripsRouter.put(
     if (doc.frozen) {
       await doc.populate(TRIP_POPULATE);
       return res.json(toTripDTO(doc as unknown as Populated));
-    }
-    if (doc.scheduleStops.length !== doc.employeeIds.length) {
-      throw new HttpError(422, 'Enter driver reach times for all employees before locking the trip');
     }
     doc.frozen = true;
     await doc.save();

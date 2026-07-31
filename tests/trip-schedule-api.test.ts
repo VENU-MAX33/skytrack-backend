@@ -53,7 +53,7 @@ async function setupScheduledTrip() {
   return { token, trip: created.body };
 }
 
-test('trip creation waits for manually entered employee reach times', async () => {
+test('trip creation does not require manually entered employee reach times', async () => {
   const { trip } = await setupScheduledTrip();
   assert.equal(trip.schedule, null);
 });
@@ -112,22 +112,19 @@ test('trip creation accepts reach times entered before vehicle selection', async
   assert.equal(created.body.schedule.stops[0].plannedAt, '2026-07-17T02:40:00.000Z');
 });
 
-test('trip cannot lock until every employee reach time has been entered', async () => {
+test('trip can lock before employee reach times are entered and accept them later', async () => {
   const { token, trip } = await setupScheduledTrip();
-  const blocked = await request(app)
-    .put(`/api/trips/${trip.id}/freeze`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({});
-  assert.equal(blocked.status, 422);
-
-  await request(app)
-    .put(`/api/trips/${trip.id}/schedule`)
-    .set('Authorization', `Bearer ${token}`)
-    .send({ stops: [{ employeeId: 'EMP100', reachTime: '08:15' }] });
   const frozen = await request(app)
     .put(`/api/trips/${trip.id}/freeze`)
     .set('Authorization', `Bearer ${token}`)
     .send({});
   assert.equal(frozen.status, 200);
   assert.equal(frozen.body.frozen, true);
+
+  const scheduled = await request(app)
+    .put(`/api/trips/${trip.id}/schedule`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ stops: [{ employeeId: 'EMP100', reachTime: '08:15' }] });
+  assert.equal(scheduled.status, 200);
+  assert.equal(scheduled.body.schedule.stops[0].plannedAt, '2026-07-17T02:45:00.000Z');
 });
