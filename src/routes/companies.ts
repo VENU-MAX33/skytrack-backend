@@ -81,3 +81,43 @@ companiesRouter.put('/:id/status', asyncHandler(async (req, res) => {
   if (!company) throw new HttpError(404, 'Company not found');
   res.json({ id: company._id.toString(), status: company.status });
 }));
+
+// DLT identifiers are platform-managed because arbitrary tenant-controlled
+// sender IDs could impersonate another approved entity.
+companiesRouter.put('/:id/sms-config', asyncHandler(async (req, res) => {
+  if (!isValidObjectId(req.params.id)) throw new HttpError(404, 'Company not found');
+  const { entityId, senderId, templates } = req.body as {
+    entityId?: string;
+    senderId?: string;
+    templates?: Record<string, unknown>;
+  };
+  const normalizedSender = senderId === undefined ? undefined : String(senderId).trim().toUpperCase();
+  if (normalizedSender && !/^[A-Z]{3,6}$/.test(normalizedSender)) {
+    throw new HttpError(400, 'Operational DLT sender/header must be 3-6 uppercase letters');
+  }
+  const allowed = ['loginOtp', 'pickupOtp', 'sos', 'tripDriver', 'locationRequest', 'otpEscalation'] as const;
+  const update: Record<string, string> = {};
+  for (const key of allowed) {
+    if (!templates || !(key in templates)) continue;
+    const value = String(templates[key] ?? '').trim();
+    if (value && !/^[A-Za-z0-9_-]{1,100}$/.test(value)) throw new HttpError(400, `Invalid Fast2SMS Message ID for ${key}`);
+    update[`smsTemplates.${key}`] = value;
+  }
+  const normalizedEntity = entityId === undefined ? undefined : String(entityId).trim();
+  if (normalizedEntity && !/^[A-Za-z0-9_-]{4,100}$/.test(normalizedEntity)) throw new HttpError(400, 'Invalid DLT PE/Entity ID');
+  if (normalizedEntity !== undefined) update.smsEntityId = normalizedEntity;
+  if (normalizedSender !== undefined) update.smsSenderId = normalizedSender;
+  if (!Object.keys(update).length) throw new HttpError(400, 'Provide a PE ID, sender ID, or at least one Message ID');
+  const company = await Company.findByIdAndUpdate(
+    req.params.id,
+    { $set: update },
+    { new: true },
+  ).select('smsEntityId smsSenderId smsTemplates');
+  if (!company) throw new HttpError(404, 'Company not found');
+  res.json({
+    entityId: company.smsEntityId,
+    senderId: company.smsSenderId,
+    templates: company.smsTemplates,
+    readyForOtp: Boolean(company.smsEntityId && company.smsSenderId && company.smsTemplates.loginOtp && company.smsTemplates.pickupOtp),
+  });
+}));

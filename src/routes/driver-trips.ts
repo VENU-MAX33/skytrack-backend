@@ -9,7 +9,7 @@ import { tripCompletionDeadline } from '../services/trip-alert.service.js';
 import { emitOtpSent, emitEmployeeVerified, emitTripStatus } from '../websocket/index.js';
 import { emitLocationRequest } from '../websocket/index.js';
 import { LocationRequest } from '../models/LocationRequest.js';
-import { sendCompanySms } from '../services/sms.service.js';
+import { dltTextVariable, sendCompanySms } from '../services/sms.service.js';
 import { env } from '../config/env.js';
 
 export const driverTripsRouter = Router();
@@ -195,16 +195,18 @@ driverTripsRouter.post(
     const emp = findTripEmployee(trip, req.params.empId);
     if (!emp.contact) throw new HttpError(422, 'Employee has no phone number on file');
 
-    await sendOtp({
+    const delivery = await sendOtp({
       purpose: 'pickup',
       phone: emp.contact,
       tripId: trip._id,
+      tripReference: trip.tripId,
       employeeId: emp._id,
       driverId: trip.driverId?._id,
+      requestIp: req.ip,
     });
     // Tell the employee's app an OTP was sent; the code itself travels by SMS only.
     emitOtpSent(emp._id.toString(), { tripId: trip.tripId });
-    res.json({ sent: true });
+    res.json({ sent: true, status: delivery.status, deliveryId: delivery.deliveryId });
   })
 );
 
@@ -243,7 +245,17 @@ driverTripsRouter.post(
       `Open employee app: ${env.employeeAppPublicUrl}/trip/${encodeURIComponent(trip.tripId)}`,
     ].join(' | ');
     try {
-      await sendCompanySms({ phone: employee.contact, kind: 'location-request', body });
+      await sendCompanySms({
+        phone: employee.contact,
+        kind: 'location-request',
+        // Fast2SMS Message ID 224773: trip ID, then scheduled date/time.
+        variables: [
+          dltTextVariable([trip.tripId]),
+          dltTextVariable([trip.date, trip.shiftTime]),
+        ],
+        fallbackBody: body,
+        referenceId: request._id.toString(),
+      });
       request.smsSentAt = new Date();
       await request.save();
     } catch (error) {

@@ -93,13 +93,14 @@ driverAuthRouter.post(
     if (!driver) throw new HttpError(404, 'Phone number not registered');
     if (driver.active !== 'Yes') throw new HttpError(403, 'This account is inactive');
 
-    await tenantContext.run({ companyId: company._id.toString() }, () => sendOtp({
+    const delivery = await tenantContext.run({ companyId: company._id.toString() }, () => sendOtp({
       purpose: 'login',
       phone: driver.contact,
       driverId: driver._id,
+      requestIp: req.ip,
     }));
 
-    res.json({ sent: true }); // the OTP is delivered by SMS only, never in the response
+    res.json({ sent: true, status: delivery.status, deliveryId: delivery.deliveryId });
   })
 );
 

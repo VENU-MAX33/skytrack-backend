@@ -29,6 +29,8 @@ import { staffRouter } from './routes/staff.js';
 import { employeeFeedbackRouter } from './routes/employee-feedback.js';
 import { feedbackRouter } from './routes/feedback.js';
 import { companiesRouter } from './routes/companies.js';
+import { smsWebhookRouter } from './routes/sms-webhook.js';
+import { smsDeliveriesRouter } from './routes/sms-deliveries.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 
@@ -99,6 +101,10 @@ export function createApp(): Express {
     res.status(ready ? 200 : 503).json({ ok: ready });
   });
 
+  // Provider callback: authenticated by a high-entropy secret in the URL and
+  // deliberately mounted before user authentication middleware.
+  app.use('/api/webhooks/fast2sms', smsWebhookRouter);
+
   // --- Public auth endpoints (rate-limited; brute-force protection) ---
   app.use('/api/auth/login', loginLimiter);
   app.use('/api/driver/request-otp', otpRequestLimiter);
@@ -136,6 +142,7 @@ export function createApp(): Express {
   // --- Back-office: employee documents + notifications ---
   app.use('/api/employees', requireBackOffice, employeeDocumentsRouter);
   app.use('/api/notifications', requireBackOffice, notificationsRouter);
+  app.use('/api/sms-deliveries', requireBackOfficeRead, smsDeliveriesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

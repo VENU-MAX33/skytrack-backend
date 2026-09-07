@@ -12,7 +12,7 @@ import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { STATUS_BUCKETS, localToday } from '../lib/statusBuckets.js';
 import { emitTripFrozen, emitTripScheduleUpdate, emitTripStatus, emitTripUnassigned } from '../websocket/index.js';
 import { idempotent } from '../middleware/idempotency.js';
-import { sendCompanySms } from '../services/sms.service.js';
+import { dltTextVariable, sendCompanySms } from '../services/sms.service.js';
 import { env } from '../config/env.js';
 
 export const tripsRouter = Router();
@@ -312,8 +312,22 @@ tripsRouter.post(
       `Employees: ${populated.employeeIds.length}`,
       `Open driver app: ${link}`,
     ].join(' | ');
+    let deliveryId = '';
     try {
-      await sendCompanySms({ phone: driver.contact, kind: 'trip-driver', body });
+      const delivery = await sendCompanySms({
+        phone: driver.contact,
+        kind: 'trip-driver',
+        // Fast2SMS Message ID 224774: trip ID, then scheduled date/time.
+        // The approved Driver-app URL is static text owned by the template.
+        variables: [
+          dltTextVariable([doc.tripId]),
+          dltTextVariable([doc.date, doc.shiftTime]),
+        ],
+        fallbackBody: body,
+        referenceId: doc._id.toString(),
+        retryPolicy: { dedupeUncertain: true, maxAttempts: 3, baseDelayMs: 60_000 },
+      });
+      deliveryId = delivery.deliveryId;
       doc.driverSmsSentAt = new Date();
       doc.driverSmsError = '';
       await doc.save();
@@ -322,7 +336,12 @@ tripsRouter.post(
       await doc.save();
       throw error;
     }
-    res.json({ sent: true, sentAt: doc.driverSmsSentAt?.toISOString() ?? null });
+    res.json({
+      sent: true,
+      status: 'accepted',
+      deliveryId,
+      acceptedAt: doc.driverSmsSentAt?.toISOString() ?? null,
+    });
   })
 );
 

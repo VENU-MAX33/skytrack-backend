@@ -12,6 +12,7 @@ export interface CompanyDoc {
   vendors: string[];
   timezone: string;
   /** DLT-approved sender ID and message templates. Managed by the platform owner only. */
+  smsEntityId: string;
   smsSenderId: string;
   smsTemplates: {
     loginOtp: string;
@@ -36,6 +37,7 @@ const companySchema = new Schema<CompanyDoc>({
   lng: { type: Number, default: 0 },
   vendors: { type: [String], default: [] },
   timezone: { type: String, default: 'Asia/Kolkata' },
+  smsEntityId: { type: String, default: '', trim: true },
   smsSenderId: { type: String, default: '', trim: true, uppercase: true },
   smsTemplates: {
     loginOtp: { type: String, default: '' },

@@ -22,13 +22,14 @@ employeeAuthRouter.post(
     if (!employee) throw new HttpError(404, 'Phone number not registered');
     if (employee.active !== 'Yes') throw new HttpError(403, 'This account is inactive');
 
-    await tenantContext.run({ companyId: company._id.toString() }, () => sendOtp({
+    const delivery = await tenantContext.run({ companyId: company._id.toString() }, () => sendOtp({
       purpose: 'login',
       phone: employee.contact,
       employeeId: employee._id,
+      requestIp: req.ip,
     }));
 
-    res.json({ sent: true }); // the OTP is delivered by SMS only, never in the response
+    res.json({ sent: true, status: delivery.status, deliveryId: delivery.deliveryId });
   })
 );
 

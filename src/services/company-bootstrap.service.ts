@@ -18,11 +18,12 @@ import { SOSAlert } from '../models/SOSAlert.js';
 import { SosConfig } from '../models/SosConfig.js';
 import { Trip } from '../models/Trip.js';
 import { Vehicle } from '../models/Vehicle.js';
+import { SmsDelivery } from '../models/SmsDelivery.js';
 
 const tenantModels = [
   Approval, CompanyConfig, Counter, Driver, Employee, EmployeeDocument,
   EscortReport, Feedback, IdempotencyKey, LocationRequest, Notification, OTP, Roster, Route,
-  SOSAlert, SosConfig, Trip, Vehicle,
+  SOSAlert, SosConfig, SmsDelivery, Trip, Vehicle,
 ];
 
 /** Creates Company A and safely labels records created by the old single-company release. */

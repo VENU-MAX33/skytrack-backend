@@ -39,6 +39,8 @@ sosRouter.post(
     let tripObjectId: Types.ObjectId | undefined;
     let routeName: string | undefined;
     let vehicleNo: string | undefined;
+    let tripDate: string | undefined;
+    let tripTime: string | undefined;
     if (tripId) {
       const trip = await Trip.findOne({ tripId, employeeIds: req.auth!.sub });
       if (!trip) throw new HttpError(404, 'Trip not found or you are not on this trip');
@@ -50,6 +52,8 @@ sosRouter.post(
       ]);
       routeName = route?.name;
       vehicleNo = vehicle?.rtoNo;
+      tripDate = trip.date;
+      tripTime = trip.shiftTime;
     }
 
     // Fetch employee name/contact for the SMS notification
@@ -63,8 +67,11 @@ sosRouter.post(
       reason,
       photoBase64,
       employeeName: employee?.name,
+      employeeReference: employee?.empId,
       employeeContact: employee?.contact,
       tripReference: tripObjectId ? tripId : undefined,
+      tripDate,
+      tripTime,
       routeName,
       vehicleNo,
     });

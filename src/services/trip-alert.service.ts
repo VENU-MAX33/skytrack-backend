@@ -2,7 +2,7 @@ import type { Types } from 'mongoose';
 import { Trip, type TripDoc } from '../models/Trip.js';
 import { SosConfig } from '../models/SosConfig.js';
 import { createNotification } from './notification.service.js';
-import { sendCompanySms } from './sms.service.js';
+import { dltTextVariable, sendCompanySms } from './sms.service.js';
 import { Company } from '../models/Company.js';
 import { tenantContext } from '../tenancy/context.js';
 
@@ -39,6 +39,16 @@ export function tripCompletionDeadline(trip: Pick<TripDoc, 'date' | 'shiftTime'>
 function pendingEmployees(trip: AlertTrip): AlertTrip['employeeIds'] {
   const verified = new Set(trip.verifiedEmployees.map((employeeId) => employeeId.toString()));
   return trip.employeeIds.filter((employee) => !verified.has(employee._id.toString()));
+}
+
+export function pendingEmployeeDltSummary(
+  pending: Array<{ empId: string; name: string }>,
+): string {
+  if (pending.length === 0) return 'NONE';
+  const first = dltTextVariable([pending[0].empId, pending[0].name], 'UNKNOWN');
+  if (pending.length === 1) return first;
+  const suffix = ` AND ${pending.length - 1} OTHERS`;
+  return `${first.slice(0, Math.max(1, 40 - suffix.length)).trimEnd()}${suffix}`;
 }
 
 function tripLabel(trip: AlertTrip): string {
@@ -111,7 +121,18 @@ async function sendIncompleteOtpSms(trip: AlertTrip, now: Date): Promise<void> {
   }
 
   try {
-    await sendCompanySms({ phone: alertPhone, kind: 'otp-escalation', body: incompleteOtpMessage(populated, pending) });
+    await sendCompanySms({
+      phone: alertPhone,
+      kind: 'otp-escalation',
+      // Fast2SMS Message ID 224776: trip ID, then pending employee summary.
+      variables: [
+        dltTextVariable([populated.tripId]),
+        pendingEmployeeDltSummary(pending),
+      ],
+      fallbackBody: incompleteOtpMessage(populated, pending),
+      referenceId: populated._id.toString(),
+      retryPolicy: { dedupeUncertain: true, maxAttempts: 3, baseDelayMs: 60_000 },
+    });
     await Trip.updateOne(
       { _id: populated._id, incompleteOtpSmsSentAt: null },
       { $set: { incompleteOtpSmsSentAt: now, incompleteOtpSmsClaimedAt: null } }

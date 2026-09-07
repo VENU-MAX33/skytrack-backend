@@ -86,7 +86,7 @@ test('driver phone-only login discovers the owning company automatically', async
 
   const response = await request(app).post('/api/driver/request-otp').send({ phone: '9876543210' });
   assert.equal(response.status, 200);
-  const otp = await OTP.collection.findOne({ phone: '+91 98765 43210' });
+  const otp = await OTP.collection.findOne({ phone: '9876543210' });
   assert.equal(String(otp?.companyId), companyB._id.toString());
 });
 

@@ -1,110 +1,110 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import type { Types } from 'mongoose';
+import { Types } from 'mongoose';
 import { OTP, type OtpPurpose } from '../models/OTP.js';
-import { env } from '../config/env.js';
 import { HttpError } from '../middleware/errors.js';
-import { currentCompanyBrand, formatCompanySms } from './sms.service.js';
+import { dltTextVariable, sendCompanySms } from './sms.service.js';
+import { normalizePhone } from './phone-login.service.js';
 
-const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const OTP_TTL_MS = 5 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 45 * 1000;
+const HOURLY_WINDOW_MS = 60 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 3;
-const MAX_SENDS_PER_WINDOW = 3; // per (purpose, phone, trip, employee) within the TTL window
+const MAX_SENDS_PER_TTL = 3;
+const MAX_SENDS_PER_HOUR = 10;
+const MAX_SENDS_PER_IP_HOUR = 30;
 
 interface OtpContext {
   purpose: OtpPurpose;
   phone: string;
   tripId?: Types.ObjectId;
+  tripReference?: string;
   employeeId?: Types.ObjectId;
   driverId?: Types.ObjectId;
+  requestIp?: string;
 }
 
 export function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  return String(crypto.randomInt(100000, 1000000));
 }
 
-// Pluggable SMS delivery. Dev-mode logs to console; fast2sms sends real SMS; msg91 is stubbed.
-async function deliverSms(phone: string, code: string, purpose: OtpPurpose): Promise<void> {
-  const companyName = await currentCompanyBrand();
-  const kind = purpose === 'pickup' ? 'pickup-otp' : 'login-otp';
-  const message = formatCompanySms(companyName, kind, `Your OTP is ${code}. Valid for 5 minutes.`);
-  if (env.smsProvider === 'fast2sms') {
-    if (!env.fast2smsApiKey) {
-      throw new HttpError(500, 'Fast2SMS is selected but FAST2SMS_API_KEY is not set');
-    }
-    // Fast2SMS wants a bare 10-digit Indian mobile number (no +91 / spaces).
-    const number = phone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
-    if (!/^\d{10}$/.test(number)) {
-      throw new HttpError(422, `Cannot send SMS: "${phone}" is not a valid 10-digit mobile number`);
-    }
-
-    interface Fast2SmsResponse { return?: boolean; message?: unknown }
-    const send = async (body: Record<string, string>): Promise<Fast2SmsResponse> => {
-      try {
-        const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-          method: 'POST',
-          headers: { authorization: env.fast2smsApiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        return (await res.json()) as Fast2SmsResponse;
-      } catch {
-        throw new HttpError(502, 'Fast2SMS request failed — check network connection and API key');
-      }
-    };
-    const detail = (d: Fast2SmsResponse): string =>
-      Array.isArray(d.message) ? d.message.join('; ') : String(d.message ?? 'unknown error');
-
-    // The bare OTP route always sends Fast2SMS's generic wording. Use Quick SMS
-    // until this company has an approved DLT template, so recipients see the
-    // correct company name in the message itself.
-    const data = await send({ route: 'q', message, numbers: number });
-    if (!data.return) {
-      throw new HttpError(502, `Fast2SMS could not send the SMS: ${detail(data)}`);
-    }
-    return;
-  }
-  if (env.smsProvider === 'msg91') {
-    if (!env.msg91.authKey || !env.msg91.templateId) {
-      throw new HttpError(500, 'MSG91 is selected but not configured (set MSG91_* env vars)');
-    }
-    // TODO: real MSG91 call. Kept as a stub so the flow is provider-ready.
-    console.warn('[otp] MSG91 send not yet implemented — falling back to console log');
-  }
-  console.log(`\n[otp] === DEV OTP === phone=${phone} code=${code} company=${companyName}\n`);
-}
-
-/**
- * Creates an OTP record and delivers it.
- *
- * The plain code is NEVER returned to callers — it must reach the user only via
- * SMS (or, in dev mode, the server console log inside deliverSms). Returning it
- * previously let routes echo it back to the client as `devCode`, which turned
- * OTP login into a no-op for anyone who knew a registered phone number.
- */
-export async function sendOtp(ctx: OtpContext): Promise<void> {
-  const since = new Date(Date.now() - OTP_TTL_MS);
-  const recentSends = await OTP.countDocuments({
+function otpIdentity(ctx: OtpContext, phone: string) {
+  return {
     purpose: ctx.purpose,
-    phone: ctx.phone,
+    phone,
     tripId: ctx.tripId ?? null,
     employeeId: ctx.employeeId ?? null,
-    createdAt: { $gte: since },
-  });
-  if (recentSends >= MAX_SENDS_PER_WINDOW) {
-    throw new HttpError(429, 'Too many OTP requests. Please wait a few minutes and try again.');
+  };
+}
+
+/** Creates an OTP, activates it only after provider acceptance, and never returns the code. */
+export async function sendOtp(ctx: OtpContext): Promise<{ deliveryId: string; status: 'accepted' }> {
+  const phone = normalizePhone(ctx.phone);
+  const now = new Date();
+  const identity = otpIdentity(ctx, phone);
+  const successfulStates = ['pending_delivery', 'active'] as const;
+
+  const latest = await OTP.findOne({ ...identity, deliveryStatus: { $in: successfulStates } }).sort({ createdAt: -1 });
+  if (latest && now.getTime() - latest.createdAt.getTime() < RESEND_COOLDOWN_MS) {
+    const seconds = Math.ceil((RESEND_COOLDOWN_MS - (now.getTime() - latest.createdAt.getTime())) / 1000);
+    throw new HttpError(429, `Please wait ${seconds} seconds before requesting another OTP.`);
   }
+
+  const ttlSince = new Date(now.getTime() - OTP_TTL_MS);
+  const hourSince = new Date(now.getTime() - HOURLY_WINDOW_MS);
+  const [recentSends, hourlySends, ipHourlySends] = await Promise.all([
+    OTP.countDocuments({ ...identity, deliveryStatus: { $in: successfulStates }, createdAt: { $gte: ttlSince } }),
+    OTP.countDocuments({ phone, deliveryStatus: { $in: successfulStates }, createdAt: { $gte: hourSince } }),
+    ctx.requestIp
+      ? OTP.countDocuments({ requestIp: ctx.requestIp, deliveryStatus: { $in: successfulStates }, createdAt: { $gte: hourSince } })
+      : Promise.resolve(0),
+  ]);
+  if (recentSends >= MAX_SENDS_PER_TTL) throw new HttpError(429, 'Too many OTP requests. Please wait a few minutes and try again.');
+  if (hourlySends >= MAX_SENDS_PER_HOUR) throw new HttpError(429, 'Hourly OTP limit reached. Please try again later.');
+  if (ipHourlySends >= MAX_SENDS_PER_IP_HOUR) throw new HttpError(429, 'Too many OTP requests from this network. Please try again later.');
 
   const code = generateOtp();
   const otpHash = await bcrypt.hash(code, 10);
-  await OTP.create({
-    purpose: ctx.purpose,
-    phone: ctx.phone,
+  const otp = await OTP.create({
+    ...identity,
     otpHash,
-    tripId: ctx.tripId ?? null,
-    employeeId: ctx.employeeId ?? null,
     driverId: ctx.driverId ?? null,
-    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    expiresAt: new Date(now.getTime() + OTP_TTL_MS),
+    deliveryStatus: 'pending_delivery',
+    requestIp: ctx.requestIp ?? '',
   });
 
-  await deliverSms(ctx.phone, code, ctx.purpose);
+  try {
+    const kind = ctx.purpose === 'pickup' ? 'pickup-otp' : 'login-otp';
+    const variables = ctx.purpose === 'pickup'
+      ? [code, dltTextVariable([ctx.tripReference ?? ctx.tripId?.toString()])]
+      : [code];
+    const delivery = await sendCompanySms({
+      phone,
+      kind,
+      variables,
+      fallbackBody: ctx.purpose === 'pickup'
+        ? `Your OTP is ${code} for trip ${ctx.tripReference ?? 'verification'}. Valid for 5 minutes.`
+        : `Your OTP is ${code}. Valid for 5 minutes.`,
+      referenceId: otp._id.toString(),
+    });
+
+    // A newer code supersedes old codes only after its SMS was accepted.
+    await OTP.updateMany(
+      { ...identity, _id: { $ne: otp._id }, deliveryStatus: 'active', consumed: false },
+      { $set: { deliveryStatus: 'superseded' } },
+    );
+    otp.deliveryStatus = 'active';
+    otp.acceptedAt = new Date();
+    otp.smsDeliveryId = new Types.ObjectId(delivery.deliveryId);
+    await otp.save();
+    return { deliveryId: delivery.deliveryId, status: 'accepted' };
+  } catch (error) {
+    otp.deliveryStatus = 'delivery_failed';
+    otp.deliveryError = error instanceof Error ? error.message.slice(0, 500) : 'SMS delivery failed';
+    await otp.save();
+    throw error;
+  }
 }
 
 interface VerifyContext {
@@ -115,21 +115,20 @@ interface VerifyContext {
   employeeId?: Types.ObjectId;
 }
 
-/** Verifies the most recent matching OTP. Throws HttpError on failure. */
 export async function verifyOtp(ctx: VerifyContext): Promise<true> {
+  const phone = normalizePhone(ctx.phone);
   const doc = await OTP.findOne({
     purpose: ctx.purpose,
-    phone: ctx.phone,
+    phone,
     tripId: ctx.tripId ?? null,
     employeeId: ctx.employeeId ?? null,
     consumed: false,
+    deliveryStatus: 'active',
   }).sort({ createdAt: -1 });
 
   if (!doc) throw new HttpError(400, 'No active OTP. Please request a new one.');
   if (doc.expiresAt.getTime() < Date.now()) throw new HttpError(400, 'OTP has expired.');
-  if (doc.attempts >= MAX_VERIFY_ATTEMPTS) {
-    throw new HttpError(429, 'Too many incorrect attempts. Please request a new OTP.');
-  }
+  if (doc.attempts >= MAX_VERIFY_ATTEMPTS) throw new HttpError(429, 'Too many incorrect attempts. Please request a new OTP.');
 
   const ok = await bcrypt.compare(ctx.code, doc.otpHash);
   if (!ok) {

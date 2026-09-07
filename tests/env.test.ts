@@ -35,9 +35,14 @@ test('allows any localhost Vite port during development but not production', () 
 });
 
 test('production configuration rejects weak secrets and non-HTTPS origins', () => {
-  const base = { nodeEnv: 'production', jwtSecret: 'a'.repeat(40), corsOrigins: ['https://admin.example.com'], smsProvider: 'fast2sms', fast2smsApiKey: 'key' };
+  const base = {
+    nodeEnv: 'production', jwtSecret: 'a'.repeat(40), corsOrigins: ['https://admin.example.com'],
+    smsProvider: 'fast2sms', fast2smsApiKey: 'key', fast2smsMode: 'quick', fast2smsWebhookSecret: 'secret',
+  };
   assert.doesNotThrow(() => assertProductionConfig(base));
   assert.throws(() => assertProductionConfig({ ...base, jwtSecret: 'change-me' }), /JWT_SECRET/);
   assert.throws(() => assertProductionConfig({ ...base, corsOrigins: ['http://admin.example.com'] }), /HTTPS/);
   assert.throws(() => assertProductionConfig({ ...base, fast2smsApiKey: '' }), /FAST2SMS_API_KEY/);
+  assert.throws(() => assertProductionConfig({ ...base, fast2smsMode: 'automatic' }), /FAST2SMS_SMS_MODE/);
+  assert.throws(() => assertProductionConfig({ ...base, fast2smsWebhookSecret: '' }), /WEBHOOK_SECRET/);
 });

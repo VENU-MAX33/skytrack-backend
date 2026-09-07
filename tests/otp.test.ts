@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import request from 'supertest';
 import { app, startTestDb, stopTestDb, clearDb, makeDriver, makeEmployee } from './helpers.js';
 import { OTP } from '../src/models/OTP.js';
+import { SmsDelivery } from '../src/models/SmsDelivery.js';
 
 before(startTestDb);
 after(stopTestDb);
@@ -23,8 +24,11 @@ test('driver request-otp does not leak the OTP code in the response', async () =
   assert.equal(res.body.sent, true);
   assert.ok(!('devCode' in res.body), 'response must not contain devCode');
   assert.ok(!('code' in res.body), 'response must not contain code');
+  assert.equal(res.body.status, 'accepted');
   // The OTP was still generated and stored server-side (delivered via SMS only).
   assert.equal(await OTP.countDocuments({ phone: driver.contact }), 1);
+  assert.equal((await OTP.findOne({ phone: driver.contact }))?.deliveryStatus, 'active');
+  assert.equal(await SmsDelivery.countDocuments({ kind: 'login-otp', status: 'accepted' }), 1);
 });
 
 test('employee request-otp does not leak the OTP code in the response', async () => {
@@ -81,4 +85,29 @@ test('driver verify-otp rejects an incorrect code', async () => {
     .send({ phone: driver.contact, code: '999999' });
 
   assert.equal(res.status, 400);
+});
+
+test('a failed newer delivery does not hide an older active OTP', async () => {
+  const driver = await makeDriver({ contact: '9845000777' });
+  await OTP.create({
+    purpose: 'login', phone: driver.contact, otpHash: await bcrypt.hash('222222', 10),
+    driverId: driver._id, deliveryStatus: 'active', expiresAt: new Date(Date.now() + 300_000),
+  });
+  await OTP.create({
+    purpose: 'login', phone: driver.contact, otpHash: await bcrypt.hash('333333', 10),
+    driverId: driver._id, deliveryStatus: 'delivery_failed', expiresAt: new Date(Date.now() + 300_000),
+  });
+
+  const res = await request(app).post('/api/driver/verify-otp').send({ phone: driver.contact, code: '222222' });
+  assert.equal(res.status, 200);
+});
+
+test('OTP requests normalize Indian phone formats and enforce resend cooldown', async () => {
+  const driver = await makeDriver({ contact: '+91 98450 00666' });
+  const first = await request(app).post('/api/driver/request-otp').send({ phone: '09845000666' });
+  const second = await request(app).post('/api/driver/request-otp').send({ phone: '9845000666' });
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 429);
+  assert.equal(await OTP.countDocuments({ phone: '9845000666' }), 1);
 });

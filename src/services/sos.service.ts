@@ -1,7 +1,7 @@
 import type { Types } from 'mongoose';
 import { SOSAlert, type SOSAlertDoc } from '../models/SOSAlert.js';
 import { SosConfig } from '../models/SosConfig.js';
-import { sendCompanySms, currentCompanyBrand } from './sms.service.js';
+import { dltTextVariable, sendCompanySms, currentCompanyBrand } from './sms.service.js';
 import type { HydratedDocument } from 'mongoose';
 import { Driver } from '../models/Driver.js';
 
@@ -13,8 +13,11 @@ interface CreateSosInput {
   reason?: string;
   photoBase64?: string;
   employeeName?: string;
+  employeeReference?: string;
   employeeContact?: string;
   tripReference?: string;
+  tripDate?: string;
+  tripTime?: string;
   routeName?: string;
   vehicleNo?: string;
 }
@@ -76,7 +79,20 @@ export async function createSos(input: CreateSosInput): Promise<HydratedDocument
       vehicleNo: input.vehicleNo,
     });
     const companyName = await currentCompanyBrand();
-    sendCompanySms({ phone: config.alertPhone, kind: 'sos', body: info, companyName }).catch((err) => {
+    sendCompanySms({
+      phone: config.alertPhone,
+      kind: 'sos',
+      // Fast2SMS Message ID 224772: employee ID/name, then trip/date/time.
+      // Sensitive and detailed emergency data remains in the secure dashboard.
+      variables: [
+        dltTextVariable([input.employeeReference, input.employeeName], 'UNKNOWN'),
+        dltTextVariable([input.tripReference, input.tripDate, input.tripTime], 'NOT LINKED'),
+      ],
+      fallbackBody: info,
+      companyName,
+      referenceId: alert._id.toString(),
+      retryPolicy: { dedupeUncertain: true, maxAttempts: 2, baseDelayMs: 60_000 },
+    }).catch((err) => {
       console.error(`[sos-sms] Failed to SMS ${config.alertPhone}:`, err instanceof Error ? err.message : err);
     });
   }

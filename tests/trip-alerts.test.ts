@@ -7,11 +7,25 @@ import { Route } from '../src/models/Route.js';
 import { Trip } from '../src/models/Trip.js';
 import { Notification } from '../src/models/Notification.js';
 import { SosConfig } from '../src/models/SosConfig.js';
-import { processTripAlerts } from '../src/services/trip-alert.service.js';
+import { pendingEmployeeDltSummary, processTripAlerts } from '../src/services/trip-alert.service.js';
 
 before(startTestDb);
 after(stopTestDb);
 beforeEach(clearDb);
+
+test('pending employee DLT summary identifies one employee and stays within 40 characters', () => {
+  assert.equal(
+    pendingEmployeeDltSummary([{ empId: 'EMP001', name: 'Ravi Kumar' }]),
+    'EMP001 Ravi Kumar',
+  );
+  const multiple = pendingEmployeeDltSummary([
+    { empId: 'EMP001', name: 'A very long employee name for testing' },
+    { empId: 'EMP002', name: 'Second Employee' },
+    { empId: 'EMP003', name: 'Third Employee' },
+  ]);
+  assert.ok(multiple.length <= 40);
+  assert.match(multiple, /AND 2 OTHERS$/);
+});
 
 async function makeTrip(options: {
   startedAt?: Date;

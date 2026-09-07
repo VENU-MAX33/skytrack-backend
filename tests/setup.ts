@@ -4,6 +4,8 @@
 process.env.MONGODB_URI ??= 'mongodb://127.0.0.1/test';
 process.env.JWT_SECRET ??= 'test-secret';
 process.env.SMS_PROVIDER ??= 'dev';
+process.env.FAST2SMS_SMS_MODE ??= 'quick';
+process.env.FAST2SMS_WEBHOOK_SECRET ??= 'test-fast2sms-webhook-secret';
 process.env.CORS_ORIGINS ??= [
   'http://localhost:5173',
   'http://localhost:5174',
