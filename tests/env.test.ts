@@ -44,5 +44,5 @@ test('production configuration rejects weak secrets and non-HTTPS origins', () =
   assert.throws(() => assertProductionConfig({ ...base, corsOrigins: ['http://admin.example.com'] }), /HTTPS/);
   assert.throws(() => assertProductionConfig({ ...base, fast2smsApiKey: '' }), /FAST2SMS_API_KEY/);
   assert.throws(() => assertProductionConfig({ ...base, fast2smsMode: 'automatic' }), /FAST2SMS_SMS_MODE/);
-  assert.throws(() => assertProductionConfig({ ...base, fast2smsWebhookSecret: '' }), /WEBHOOK_SECRET/);
+  assert.doesNotThrow(() => assertProductionConfig({ ...base, fast2smsWebhookSecret: '' }));
 });

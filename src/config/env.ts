@@ -71,9 +71,6 @@ export function assertProductionConfig(config: {
   if (config.smsProvider === 'fast2sms' && !['quick', 'dlt'].includes(config.fast2smsMode ?? '')) {
     throw new Error("FAST2SMS_SMS_MODE must be either 'quick' or 'dlt'");
   }
-  if (config.smsProvider === 'fast2sms' && !config.fast2smsWebhookSecret) {
-    throw new Error('FAST2SMS_WEBHOOK_SECRET is required in production');
-  }
   if (config.smsProvider === 'msg91' && (!config.msg91AuthKey || !config.msg91SenderId || !config.msg91TemplateId)) {
     throw new Error('MSG91_AUTH_KEY, MSG91_SENDER_ID and MSG91_TEMPLATE_ID are required');
   }
