@@ -42,7 +42,7 @@ function reachTimeOnTripDate(tripDate: string, value: unknown): Date {
 // $max) from any pre-existing trips for the day — e.g. seeded data created
 // before the counter existed — so it never collides with them; after that a
 // single $inc guarantees distinct ids even under concurrent requests.
-async function nextTripId(date: string): Promise<string> {
+export async function nextTripId(date: string): Promise<string> {
   const prefix = `TRP-${date.replace(/-/g, '').slice(2)}-`;
   const counterKey = `${currentCompanyId() ?? 'legacy'}:${prefix}`;
   const existing = await Counter.findById(counterKey).lean();

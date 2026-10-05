@@ -70,6 +70,14 @@ export function emitTripFrozen(payload: {
   i.to(activeAdminRoom()).emit('trip:frozen', payload.adminTrip);
 }
 
+export function emitTripRequestRejected(employeeId: string, payload: { date: string; reason: string }): void {
+  getIo().to(rooms.employee(employeeId)).emit('trip-request:rejected', payload);
+}
+
+export function emitEmployeeNotification(employeeId: string, payload: unknown): void {
+  getIo().to(rooms.employee(employeeId)).emit('employee:notification', payload);
+}
+
 /** Tell all trip participants to refresh their displayed planned/live times. */
 export function emitTripScheduleUpdate(payload: {
   tripId: string;

@@ -31,6 +31,8 @@ import { feedbackRouter } from './routes/feedback.js';
 import { companiesRouter } from './routes/companies.js';
 import { smsWebhookRouter } from './routes/sms-webhook.js';
 import { smsDeliveriesRouter } from './routes/sms-deliveries.js';
+import { employeeTripRequestsRouter, adminTripRequestsRouter } from './routes/trip-requests.js';
+import { employeeNotificationsRouter } from './routes/employee-notifications.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 
@@ -133,6 +135,8 @@ export function createApp(): Express {
   app.use('/api/driver/trips', requireRole('driver'), driverTripsRouter);
   app.use('/api/driver/tracking', requireRole('driver'), driverTrackingRouter);
   app.use('/api/employee/trips', requireRole('employee'), employeeTripsRouter);
+  app.use('/api/employee/trip-requests', requireRole('employee'), employeeTripRequestsRouter);
+  app.use('/api/employee/notifications', requireRole('employee'), employeeNotificationsRouter);
   app.use('/api/employee/location', requireRole('employee'), employeeLocationRouter);
   app.use('/api/employee/feedback', requireRole('employee'), employeeFeedbackRouter);
   // SOS: employees raise alerts; admins acknowledge (router enforces per-route roles)
@@ -143,6 +147,7 @@ export function createApp(): Express {
   app.use('/api/employees', requireBackOffice, employeeDocumentsRouter);
   app.use('/api/notifications', requireBackOffice, notificationsRouter);
   app.use('/api/sms-deliveries', requireBackOfficeRead, smsDeliveriesRouter);
+  app.use('/api/trip-requests', requireBackOffice, adminTripRequestsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

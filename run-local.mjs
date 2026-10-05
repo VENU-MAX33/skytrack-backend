@@ -1,6 +1,5 @@
-// Dev launcher: boots a local MongoDB data directory (no local mongod required),
-// starts the real API server against it, and can seed demo data when explicitly
-// requested. The data directory persists across server restarts.
+// Dev launcher: uses the configured MongoDB URI when present. Without one, it
+// boots a local MongoDB data directory (no local mongod required).
 // Run with:  node --import tsx run-local.mjs
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
@@ -13,18 +12,22 @@ import { fileURLToPath } from 'node:url';
 
 const backendDir = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(backendDir, '.env') });
-const dbPath = path.join(backendDir, '.local-mongodb');
-await mkdir(dbPath, { recursive: true });
-const mongod = await MongoMemoryServer.create({ instance: { dbPath } });
-process.env.MONGODB_URI = mongod.getUri() + 'monitorx';
+const configuredMongoUri = process.env.MONGODB_URI?.trim();
+let dbPath = '';
+if (!configuredMongoUri) {
+  dbPath = path.join(backendDir, '.local-mongodb');
+  await mkdir(dbPath, { recursive: true });
+  const mongod = await MongoMemoryServer.create({ instance: { dbPath } });
+  process.env.MONGODB_URI = mongod.getUri() + 'monitorx';
+}
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key-change-me';
 // `config/env.ts` loads backend/.env and defaults to `dev` when no provider is
 // configured. Do not set SMS_PROVIDER here: doing so would prevent dotenv from
 // reading SMS_PROVIDER=fast2sms from backend/.env and silently log OTPs instead
 // of delivering them.
 process.env.PORT = process.env.PORT || '5000';
-console.log('[run-local] persistent local MongoDB:', process.env.MONGODB_URI);
-console.log('[run-local] data directory:', dbPath);
+console.log('[run-local] MongoDB:', process.env.MONGODB_URI);
+if (dbPath) console.log('[run-local] local data directory:', dbPath);
 
 // Import after env is set so config/env validation sees the right values.
 await import('./src/server.ts');

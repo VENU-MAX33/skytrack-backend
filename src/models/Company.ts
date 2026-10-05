@@ -19,6 +19,9 @@ export interface CompanyDoc {
     pickupOtp: string;
     sos: string;
     tripDriver: string;
+    tripEmployee: string;
+    tripEmployeeApproved: string;
+    tripEmployeeRejected: string;
     locationRequest: string;
     otpEscalation: string;
   };
@@ -44,6 +47,9 @@ const companySchema = new Schema<CompanyDoc>({
     pickupOtp: { type: String, default: '' },
     sos: { type: String, default: '' },
     tripDriver: { type: String, default: '' },
+    tripEmployee: { type: String, default: '' },
+    tripEmployeeApproved: { type: String, default: '' },
+    tripEmployeeRejected: { type: String, default: '' },
     locationRequest: { type: String, default: '' },
     otpEscalation: { type: String, default: '' },
   },

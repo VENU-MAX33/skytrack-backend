@@ -10,6 +10,8 @@ export type CompanySmsKind =
   | 'pickup-otp'
   | 'sos'
   | 'trip-driver'
+  | 'trip-employee'
+  | 'trip-employee-rejected'
   | 'location-request'
   | 'otp-escalation';
 
@@ -40,12 +42,14 @@ export interface CompanySmsInput {
   };
 }
 
-type SmsTemplateKey = 'loginOtp' | 'pickupOtp' | 'sos' | 'tripDriver' | 'locationRequest' | 'otpEscalation';
+type SmsTemplateKey = 'loginOtp' | 'pickupOtp' | 'sos' | 'tripDriver' | 'tripEmployee' | 'tripEmployeeApproved' | 'tripEmployeeRejected' | 'locationRequest' | 'otpEscalation';
 const TEMPLATE_KEYS: Record<CompanySmsKind, SmsTemplateKey> = {
   'login-otp': 'loginOtp',
   'pickup-otp': 'pickupOtp',
   sos: 'sos',
   'trip-driver': 'tripDriver',
+  'trip-employee': 'tripEmployeeApproved',
+  'trip-employee-rejected': 'tripEmployeeRejected',
   'location-request': 'locationRequest',
   'otp-escalation': 'otpEscalation',
 };
@@ -55,6 +59,8 @@ const SMS_LABELS: Record<CompanySmsKind, string> = {
   'pickup-otp': 'Trip verification OTP',
   sos: 'SOS Alert',
   'trip-driver': 'Driver Trip',
+  'trip-employee': 'Employee Trip Approved',
+  'trip-employee-rejected': 'Employee Trip Rejected',
   'location-request': 'Location Request',
   'otp-escalation': 'OTP Alert',
 };

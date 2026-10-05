@@ -95,7 +95,7 @@ companiesRouter.put('/:id/sms-config', asyncHandler(async (req, res) => {
   if (normalizedSender && !/^[A-Z]{3,6}$/.test(normalizedSender)) {
     throw new HttpError(400, 'Operational DLT sender/header must be 3-6 uppercase letters');
   }
-  const allowed = ['loginOtp', 'pickupOtp', 'sos', 'tripDriver', 'locationRequest', 'otpEscalation'] as const;
+  const allowed = ['loginOtp', 'pickupOtp', 'sos', 'tripDriver', 'tripEmployee', 'tripEmployeeApproved', 'tripEmployeeRejected', 'locationRequest', 'otpEscalation'] as const;
   const update: Record<string, string> = {};
   for (const key of allowed) {
     if (!templates || !(key in templates)) continue;

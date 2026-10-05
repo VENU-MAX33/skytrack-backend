@@ -134,4 +134,6 @@ export const env = {
   routeAmbiguityMeters: Number(process.env.ROUTE_AMBIGUITY_METERS ?? 250),
   driverAppPublicUrl: publicAppUrl('DRIVER_APP_PUBLIC_URL', process.env.DRIVER_APP_PUBLIC_URL ?? 'http://localhost:5174', process.env.NODE_ENV),
   employeeAppPublicUrl: publicAppUrl('EMPLOYEE_APP_PUBLIC_URL', process.env.EMPLOYEE_APP_PUBLIC_URL ?? 'http://localhost:5175', process.env.NODE_ENV),
+  firebaseEmployeeServiceAccountBase64: process.env.FIREBASE_EMPLOYEE_SERVICE_ACCOUNT_BASE64 ?? '',
+  firebaseEmployeeServiceAccountFile: process.env.FIREBASE_EMPLOYEE_SERVICE_ACCOUNT_FILE ?? '',
 };
