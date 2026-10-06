@@ -26,6 +26,10 @@ const corsOrigins = (
   .map((o) => o.trim())
   .filter(Boolean);
 
+// Capacitor serves bundled Android/iOS content from these fixed local origins.
+// They identify the installed app WebView, not a publicly reachable website.
+const nativeAppOrigins = new Set(['https://localhost', 'capacitor://localhost']);
+
 /**
  * Vite picks the next free port when one of the usual dev ports is occupied.
  * Accept any loopback port while developing so a browser request does not fail
@@ -33,7 +37,7 @@ const corsOrigins = (
  * Production remains restricted to the explicitly configured origin list.
  */
 export function isCorsOriginAllowed(origin: string | undefined): boolean {
-  if (!origin || corsOrigins.includes(origin)) return true;
+  if (!origin || corsOrigins.includes(origin) || nativeAppOrigins.has(origin)) return true;
   if (process.env.NODE_ENV === 'production') return false;
 
   try {

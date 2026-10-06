@@ -34,6 +34,19 @@ test('allows any localhost Vite port during development but not production', () 
   }
 });
 
+test('allows fixed Capacitor app origins in production', () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    assert.equal(isCorsOriginAllowed('https://localhost'), true);
+    assert.equal(isCorsOriginAllowed('capacitor://localhost'), true);
+    assert.equal(isCorsOriginAllowed('https://malicious.example.com'), false);
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});
+
 test('production configuration rejects weak secrets and non-HTTPS origins', () => {
   const base = {
     nodeEnv: 'production', jwtSecret: 'a'.repeat(40), corsOrigins: ['https://admin.example.com'],
