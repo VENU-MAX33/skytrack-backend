@@ -185,15 +185,22 @@ export function emitNotification(payload: unknown): void {
   getIo().to(activeAdminRoom()).emit('notification:new', payload);
 }
 
-/** Live vehicle GPS position (phone-as-GPS ping) for the admin tracking map. */
+/** Live vehicle GPS position for admins and employees on the started trip. */
 export function emitVehiclePosition(payload: {
   rtoNo: string;
   lat: number;
   lng: number;
   status: string;
   speed: number;
+  updatedAt: string;
+  tripId?: string;
+  employeeIds?: string[];
 }): void {
-  getIo().to(activeAdminRoom()).emit('vehicle:position', payload);
+  const i = getIo();
+  i.to(activeAdminRoom()).emit('vehicle:position', payload);
+  payload.employeeIds?.forEach((employeeId) => {
+    i.to(rooms.employee(employeeId)).emit('driver:location', payload);
+  });
 }
 
 /** Notify admin that a new employee feedback entry has been submitted. */

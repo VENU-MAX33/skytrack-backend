@@ -199,6 +199,13 @@ export interface EmployeeTrip {
   completedAt: string | null;
   verified: boolean; // is the requesting employee verified on this trip
   driver: { name: string; contact: string };
+  driverLocation: {
+    lat: number;
+    lng: number;
+    status: string;
+    speed: number;
+    updatedAt: string;
+  } | null;
   // Contains only this employee's stop; other passengers' times stay private.
   schedule: TripSchedule | null;
 }

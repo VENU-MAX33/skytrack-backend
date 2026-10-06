@@ -2,10 +2,12 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { Vehicle } from '../models/Vehicle.js';
 import { CompanyConfig } from '../models/CompanyConfig.js';
+import { Trip } from '../models/Trip.js';
 import { asyncHandler, HttpError } from '../middleware/errors.js';
 import { emitVehiclePosition } from '../websocket/index.js';
 
 export const driverTrackingRouter = Router();
+const ONGOING_STATUSES = ['Trip Started', 'Pickup Started', 'Drop Started'];
 
 function newKey(): string {
   return crypto.randomBytes(8).toString('hex'); // 16 hex chars, like "97aba55531b2242e"
@@ -91,13 +93,32 @@ driverTrackingRouter.post(
     vehicle.lastPingAt = new Date();
     await vehicle.save();
 
-    emitVehiclePosition({
+    const position = {
       rtoNo: vehicle.rtoNo,
       lat: vehicle.lat,
       lng: vehicle.lng,
       status: vehicle.trackStatus,
       speed: vehicle.speed,
-    });
+      updatedAt: vehicle.lastPingAt.toISOString(),
+    };
+    const startedTrips = await Trip.find({
+      driverId: req.auth!.sub,
+      vehicleId: vehicle._id,
+      frozen: true,
+      completedAt: null,
+      startedAt: { $ne: null },
+      status: { $in: ONGOING_STATUSES },
+    }).select('tripId employeeIds');
+
+    if (startedTrips.length === 0) {
+      emitVehiclePosition(position);
+    } else {
+      startedTrips.forEach((trip) => emitVehiclePosition({
+        ...position,
+        tripId: trip.tripId,
+        employeeIds: trip.employeeIds.map((employeeId) => employeeId.toString()),
+      }));
+    }
     res.json({ ok: true });
   })
 );

@@ -287,6 +287,12 @@ export function toDriverTripDTO(doc: PopulatedTrip): DriverTrip {
 
 // Employee app: trip from the requesting employee's perspective.
 export function toEmployeeTripDTO(doc: PopulatedTrip, selfId: Types.ObjectId): EmployeeTrip {
+  const locationBelongsToActiveTrip =
+    ['Trip Started', 'Pickup Started', 'Drop Started'].includes(doc.status) &&
+    !doc.completedAt &&
+    !!doc.startedAt &&
+    !!doc.vehicleId?.lastPingAt &&
+    doc.vehicleId.lastPingAt >= doc.startedAt;
   return {
     id: doc.tripId,
     status: doc.status,
@@ -305,6 +311,13 @@ export function toEmployeeTripDTO(doc: PopulatedTrip, selfId: Types.ObjectId): E
     completedAt: doc.completedAt ? doc.completedAt.toISOString() : null,
     verified: isVerified(doc.verifiedEmployees, selfId),
     driver: { name: doc.driverId?.name ?? '', contact: doc.driverId?.contact ?? '' },
+    driverLocation: locationBelongsToActiveTrip && doc.vehicleId?.lastPingAt ? {
+      lat: doc.vehicleId.lat,
+      lng: doc.vehicleId.lng,
+      status: doc.vehicleId.trackStatus,
+      speed: doc.vehicleId.speed,
+      updatedAt: doc.vehicleId.lastPingAt.toISOString(),
+    } : null,
     schedule: toTripSchedule(doc, selfId),
   };
 }
