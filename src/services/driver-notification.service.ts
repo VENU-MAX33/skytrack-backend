@@ -13,6 +13,15 @@ interface DriverTripPushInput {
   time?: string;
 }
 
+interface DriverPushInput {
+  driverId: Types.ObjectId | string;
+  title: string;
+  body: string;
+  type: string;
+  tripId: string;
+  link: string;
+}
+
 let firebaseApp: App | null | undefined;
 
 function getDriverFirebaseApp(): App | null {
@@ -44,26 +53,22 @@ function getDriverFirebaseApp(): App | null {
   }
 }
 
-export async function sendDriverTripPush(input: DriverTripPushInput): Promise<void> {
+async function sendDriverPush(input: DriverPushInput): Promise<void> {
   const app = getDriverFirebaseApp();
   if (!app) return;
   const devices = await DriverPushDevice.find({ driverId: input.driverId, active: true }).select('token').lean();
   if (!devices.length) return;
 
   const tokens = [...new Set(devices.map((device) => device.token))];
-  const schedule = `${input.date}${input.time ? ` at ${input.time}` : ''}`;
   for (let start = 0; start < tokens.length; start += 500) {
     const batch = tokens.slice(start, start + 500);
     const result = await getMessaging(app).sendEachForMulticast({
       tokens: batch,
-      notification: {
-        title: 'New trip assigned',
-        body: `${input.tripType} trip ${input.tripId} is scheduled for ${schedule}`,
-      },
+      notification: { title: input.title, body: input.body },
       data: {
-        type: 'trip-assigned',
+        type: input.type,
         tripId: input.tripId,
-        link: `/trip/${encodeURIComponent(input.tripId)}`,
+        link: input.link,
       },
       android: {
         priority: 'high',
@@ -77,4 +82,27 @@ export async function sendDriverTripPush(input: DriverTripPushInput): Promise<vo
     });
     if (invalid.length) await DriverPushDevice.updateMany({ token: { $in: invalid } }, { $set: { active: false } });
   }
+}
+
+export async function sendDriverTripPush(input: DriverTripPushInput): Promise<void> {
+  const schedule = `${input.date}${input.time ? ` at ${input.time}` : ''}`;
+  await sendDriverPush({
+    driverId: input.driverId,
+    title: 'New trip assigned',
+    body: `${input.tripType} trip ${input.tripId} is scheduled for ${schedule}`,
+    type: 'trip-assigned',
+    tripId: input.tripId,
+    link: `/trip/${encodeURIComponent(input.tripId)}`,
+  });
+}
+
+export async function sendDriverTripExpiredPush(input: DriverTripPushInput): Promise<void> {
+  await sendDriverPush({
+    driverId: input.driverId,
+    title: 'Trip moved to reports',
+    body: `${input.tripType} trip ${input.tripId} was not started within 10 hours and was auto-cancelled`,
+    type: 'trip-auto-cancelled',
+    tripId: input.tripId,
+    link: '/reports',
+  });
 }

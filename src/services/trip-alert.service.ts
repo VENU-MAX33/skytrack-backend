@@ -5,17 +5,22 @@ import { createNotification } from './notification.service.js';
 import { dltTextVariable, sendCompanySms } from './sms.service.js';
 import { Company } from '../models/Company.js';
 import { tenantContext } from '../tenancy/context.js';
+import { createEmployeeNotification } from './employee-notification.service.js';
+import { sendDriverTripExpiredPush } from './driver-notification.service.js';
+import { toTripDTO } from '../mappers.js';
+import { emitTripStatus } from '../websocket/index.js';
 
 const ONGOING_STATUSES = ['Trip Started', 'Pickup Started', 'Drop Started'];
 const OVERDUE_ELIGIBLE_STATUSES = ['Not Started Yet', 'Driver Accepted', ...ONGOING_STATUSES];
 const OTP_ESCALATION_MS = 30 * 60 * 1000;
 const CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
 const ALERT_CHECK_INTERVAL_MS = 60 * 1000;
+export const UNSTARTED_TRIP_GRACE_MS = 10 * 60 * 60 * 1000;
 
 type AlertTrip = Omit<TripDoc, 'vehicleId' | 'driverId' | 'routeId' | 'employeeIds'> & {
   _id: Types.ObjectId;
   vehicleId: { rtoNo: string } | null;
-  driverId: { name: string; contact: string } | null;
+  driverId: { _id: Types.ObjectId; name: string; contact: string } | null;
   routeId: { name: string } | null;
   employeeIds: { _id: Types.ObjectId; empId: string; name: string }[];
 };
@@ -78,6 +83,47 @@ async function createOverdueNotification(trip: AlertTrip, now: Date): Promise<vo
     await Trip.updateOne({ _id: trip._id, overdueNotifiedAt: now }, { $set: { overdueNotifiedAt: null } });
     console.error(`[trip-alert] Failed to create overdue notification for ${trip.tripId}:`, err);
   }
+}
+
+async function autoCancelUnstartedTrip(trip: AlertTrip, now: Date): Promise<void> {
+  const updated = await Trip.findOneAndUpdate(
+    {
+      _id: trip._id,
+      status: { $in: ['Not Started Yet', 'Driver Accepted'] },
+      startedAt: null,
+      completedAt: null,
+    },
+    { $set: { status: 'Auto Cancelled', completedAt: now } },
+    { new: true },
+  ).populate('vehicleId driverId routeId employeeIds');
+  if (!updated) return;
+
+  const populated = updated as unknown as AlertTrip;
+  const body = `${populated.type} trip ${populated.tripId} for ${populated.date} at ${populated.shiftTime} was not started within 10 hours and was moved to reports.`;
+  const notifications: Promise<unknown>[] = populated.employeeIds.map((employee) => createEmployeeNotification({
+    employeeId: employee._id,
+    type: 'info',
+    title: 'Trip moved to reports',
+    body,
+    link: '/reports',
+    refId: populated.tripId,
+  }));
+  if (populated.driverId?._id) {
+    notifications.push(sendDriverTripExpiredPush({
+      driverId: populated.driverId._id,
+      tripId: populated.tripId,
+      tripType: populated.type,
+      date: populated.date,
+      time: populated.shiftTime,
+    }));
+  }
+  await Promise.allSettled(notifications);
+
+  emitTripStatus({
+    trip: toTripDTO(updated as unknown as Parameters<typeof toTripDTO>[0]),
+    driverId: populated.driverId?._id.toString() ?? '',
+    employeeIds: populated.employeeIds.map((employee) => employee._id.toString()),
+  });
 }
 
 function incompleteOtpMessage(trip: AlertTrip, pending: AlertTrip['employeeIds']): string {
@@ -160,6 +206,10 @@ export async function processTripAlerts(now = new Date()): Promise<void> {
     const deadline = tripCompletionDeadline(trip);
     if (deadline && deadline.getTime() <= now.getTime()) {
       await createOverdueNotification(trip, now);
+      if (!trip.startedAt && deadline.getTime() + UNSTARTED_TRIP_GRACE_MS <= now.getTime()) {
+        await autoCancelUnstartedTrip(trip, now);
+        continue;
+      }
     }
 
     if (trip.startedAt && trip.startedAt.getTime() + OTP_ESCALATION_MS <= now.getTime()) {

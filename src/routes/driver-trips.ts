@@ -39,7 +39,7 @@ function reportRanges(date: string) {
 }
 
 function completedQuery(driverId: string) {
-  return { driverId, completedAt: { $ne: null }, status: { $in: STATUS_BUCKETS.completed } };
+  return { driverId, completedAt: { $ne: null }, status: { $in: [...STATUS_BUCKETS.completed, ...STATUS_BUCKETS.cancelled] } };
 }
 
 // Loads a trip owned by the authenticated driver (populated), or throws 404.
@@ -66,6 +66,7 @@ driverTripsRouter.get(
     const docs = await Trip.find({
       driverId: req.auth!.sub,
       frozen: true,
+      completedAt: null,
       date: { $gte: localToday() },
     })
       .sort({ date: 1, shiftTime: 1 })

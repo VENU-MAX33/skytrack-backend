@@ -6,6 +6,7 @@ import { Vehicle } from '../src/models/Vehicle.js';
 import { Route } from '../src/models/Route.js';
 import { Trip } from '../src/models/Trip.js';
 import { Notification } from '../src/models/Notification.js';
+import { EmployeeNotification } from '../src/models/EmployeeNotification.js';
 import { SosConfig } from '../src/models/SosConfig.js';
 import { pendingEmployeeDltSummary, processTripAlerts } from '../src/services/trip-alert.service.js';
 
@@ -87,6 +88,41 @@ test('a frozen trip that was never started still creates an overdue admin notifi
   await processTripAlerts(new Date('2026-07-15T04:00:00.000Z'));
 
   assert.equal(await Notification.countDocuments({ refId: trip.tripId }), 1);
+});
+
+test('an unstarted trip is auto-cancelled and alerts the employee after ten hours', async () => {
+  const { trip, employee, driver } = await makeTrip({ date: '2026-07-15', shiftTime: '09:00' });
+  await Trip.updateOne({ _id: trip._id }, { $set: { status: 'Not Started Yet', startedAt: null } });
+
+  await processTripAlerts(new Date('2026-07-15T13:31:00.000Z')); // 19:01 in India
+
+  const updated = await Trip.findById(trip._id);
+  assert.equal(updated?.status, 'Auto Cancelled');
+  assert.ok(updated?.completedAt);
+  const alert = await EmployeeNotification.findOne({ employeeId: employee._id, refId: trip.tripId });
+  assert.equal(alert?.title, 'Trip moved to reports');
+
+  const [employeeActive, driverActive, employeeReport, driverReport] = await Promise.all([
+    request(app).get('/api/employee/trips').set('Authorization', `Bearer ${tokenFor(employee._id.toString(), 'employee')}`),
+    request(app).get('/api/driver/trips').set('Authorization', `Bearer ${tokenFor(driver._id.toString(), 'driver')}`),
+    request(app).get('/api/employee/trips/report?date=2026-07-15').set('Authorization', `Bearer ${tokenFor(employee._id.toString(), 'employee')}`),
+    request(app).get('/api/driver/trips/report?date=2026-07-15').set('Authorization', `Bearer ${tokenFor(driver._id.toString(), 'driver')}`),
+  ]);
+  assert.equal(employeeActive.body.length, 0);
+  assert.equal(driverActive.body.length, 0);
+  assert.equal(employeeReport.body[0]?.status, 'Auto Cancelled');
+  assert.equal(driverReport.body.trips[0]?.status, 'Auto Cancelled');
+});
+
+test('an unstarted trip remains active before the ten-hour grace period ends', async () => {
+  const { trip } = await makeTrip({ date: '2026-07-15', shiftTime: '09:00' });
+  await Trip.updateOne({ _id: trip._id }, { $set: { status: 'Not Started Yet', startedAt: null } });
+
+  await processTripAlerts(new Date('2026-07-15T13:29:00.000Z')); // 18:59 in India
+
+  const updated = await Trip.findById(trip._id);
+  assert.equal(updated?.status, 'Not Started Yet');
+  assert.equal(updated?.completedAt, null);
 });
 
 test('unverified employee OTPs send one SOS-phone SMS escalation after 30 minutes', async () => {
