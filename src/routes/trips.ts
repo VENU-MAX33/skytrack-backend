@@ -14,6 +14,7 @@ import { emitTripFrozen, emitTripScheduleUpdate, emitTripStatus, emitTripUnassig
 import { idempotent } from '../middleware/idempotency.js';
 import { dltTextVariable, sendCompanySms } from '../services/sms.service.js';
 import { env } from '../config/env.js';
+import { sendDriverTripPush } from '../services/driver-notification.service.js';
 
 export const tripsRouter = Router();
 
@@ -285,6 +286,13 @@ tripsRouter.put(
             trip: toEmployeeTripDTO(populated as Parameters<typeof toEmployeeTripDTO>[0], employee._id),
           })),
         });
+        await sendDriverTripPush({
+          driverId: populated.driverId._id,
+          tripId: doc.tripId,
+          tripType: doc.type,
+          date: doc.date,
+          time: doc.shiftTime,
+        }).catch((error) => console.error(`[push] Driver trip ${doc.tripId} failed:`, (error as Error).message));
       }
     }
     res.json(dto);
@@ -447,6 +455,15 @@ tripsRouter.put(
         ),
       })),
     });
+    if (populated.driverId) {
+      await sendDriverTripPush({
+        driverId: populated.driverId._id,
+        tripId: doc.tripId,
+        tripType: doc.type,
+        date: doc.date,
+        time: doc.shiftTime,
+      }).catch((error) => console.error(`[push] Driver trip ${doc.tripId} failed:`, (error as Error).message));
+    }
     res.json(dto);
   })
 );

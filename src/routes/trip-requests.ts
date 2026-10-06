@@ -12,6 +12,7 @@ import { emitTripFrozen, emitTripRequestRejected } from '../websocket/index.js';
 import { toDriverTripDTO, toEmployeeTripDTO, toTripDTO } from '../mappers.js';
 import { dltTextVariable, sendCompanySms } from '../services/sms.service.js';
 import { createEmployeeNotification } from '../services/employee-notification.service.js';
+import { sendDriverTripPush } from '../services/driver-notification.service.js';
 import { recommendRoute } from '../services/route-geometry.service.js';
 
 export const employeeTripRequestsRouter = Router();
@@ -179,13 +180,20 @@ adminTripRequestsRouter.put('/:id/approve', asyncHandler(async (req, res) => {
       });
       const driver = populated.driverId;
       const time = tripType === 'Drop' ? request.logoutTime : request.loginTime;
-      if (driver?.contact) await Promise.allSettled([
-        sendCompanySms({
+      if (driver) await Promise.allSettled([
+        ...(driver.contact ? [sendCompanySms({
           phone: driver.contact,
           kind: 'trip-driver',
           variables: [tripId, dltTextVariable([request.date, time])],
           fallbackBody: `Trip ${tripId} assigned for ${request.date}.`,
           referenceId: `${request._id}:driver:${tripId}`,
+        })] : []),
+        sendDriverTripPush({
+          driverId: driver._id,
+          tripId,
+          tripType,
+          date: request.date,
+          time,
         }),
       ]);
     }
