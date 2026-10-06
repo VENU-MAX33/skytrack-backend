@@ -13,6 +13,8 @@ import { env } from '../config/env.js';
 
 export const driverAuthRouter = Router();
 const ONGOING_STATUSES = ['Trip Started', 'Pickup Started', 'Drop Started'];
+const SELECTION_TOKEN_AUDIENCE = 'skytrack-driver-company-selection';
+const TOKEN_ISSUER = 'skytrack-backend';
 
 interface DriverSelectionPayload extends jwt.JwtPayload {
   kind: 'driver-company-selection';
@@ -127,7 +129,7 @@ driverAuthRouter.post(
     const selectionToken = jwt.sign(
       { kind: 'driver-company-selection', phone: login.phone },
       env.jwtSecret,
-      { expiresIn: '10m' }
+      { algorithm: 'HS256', issuer: TOKEN_ISSUER, audience: SELECTION_TOKEN_AUDIENCE, expiresIn: '10m' }
     );
     res.json({ selectionToken, companies: await companyChoices(logins) });
   })
@@ -142,7 +144,11 @@ driverAuthRouter.post(
     if (!selectionToken || !companyId) throw new HttpError(400, 'Company selection is required');
     let payload: DriverSelectionPayload;
     try {
-      payload = jwt.verify(selectionToken, env.jwtSecret) as DriverSelectionPayload;
+      payload = jwt.verify(selectionToken, env.jwtSecret, {
+        algorithms: ['HS256'],
+        issuer: TOKEN_ISSUER,
+        audience: SELECTION_TOKEN_AUDIENCE,
+      }) as DriverSelectionPayload;
     } catch {
       throw new HttpError(401, 'Company selection expired. Verify OTP again.');
     }

@@ -15,6 +15,9 @@ export interface AuthPayload {
   companyId?: string;
 }
 
+const JWT_ISSUER = 'skytrack-backend';
+const JWT_AUDIENCE = 'skytrack-clients';
+
 // Augment Express Request so handlers can read req.auth in a typed way.
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -32,7 +35,11 @@ function readToken(req: Request): string | null {
 }
 
 export function verifyToken(token: string): AuthPayload {
-  const decoded = jwt.verify(token, env.jwtSecret) as jwt.JwtPayload;
+  const decoded = jwt.verify(token, env.jwtSecret, {
+    algorithms: ['HS256'],
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+  }) as jwt.JwtPayload;
   // Every login path signs an explicit role — a token missing one is malformed, not an admin by default.
   if (!decoded.role) throw new Error('Token missing role claim');
   return {
@@ -46,7 +53,12 @@ export function signToken(
   payload: AuthPayload,
   expiresIn: jwt.SignOptions['expiresIn'] = '12h'
 ): string {
-  return jwt.sign(payload, env.jwtSecret, { expiresIn });
+  return jwt.sign(payload, env.jwtSecret, {
+    algorithm: 'HS256',
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    expiresIn,
+  });
 }
 
 // Re-validates the token's subject against the database so a 30-day token stops

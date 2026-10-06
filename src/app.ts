@@ -36,6 +36,7 @@ import { employeeNotificationsRouter } from './routes/employee-notifications.js'
 import { driverNotificationsRouter } from './routes/driver-notifications.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
+import { rejectUnsafeInput, requireJsonMutation } from './middleware/request-security.js';
 
 // Back-office data endpoints serve the admin dashboard only. Both the main
 // admin and limited "staff" logins may reach them; drivers and employees
@@ -68,6 +69,25 @@ const otpRequestLimiter = rateLimit({
   validate: { xForwardedForHeader: false },
 });
 
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP verification attempts. Please wait before trying again.' },
+  validate: { xForwardedForHeader: false },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down and try again.' },
+  validate: { xForwardedForHeader: false },
+  skip: (req) => req.path.startsWith('/health'),
+});
+
 /**
  * Builds the Express app with all routes and middleware wired up, but without
  * connecting to the database, opening a WebSocket, or listening on a port.
@@ -84,15 +104,24 @@ export function createApp(): Express {
       ? { maxAge: 31_536_000, includeSubDomains: true, preload: true }
       : false,
   }));
-  app.use(cors({ origin: (origin, callback) => callback(null, isCorsOriginAllowed(origin)) }));
+  app.use(cors({
+    origin: (origin, callback) => callback(null, isCorsOriginAllowed(origin)),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id'],
+    maxAge: 600,
+  }));
   app.use((req, res, next) => {
-    const requestId = String(req.headers['x-request-id'] ?? crypto.randomUUID()).slice(0, 128);
+    const suppliedRequestId = String(req.headers['x-request-id'] ?? '');
+    const requestId = /^[A-Za-z0-9._-]{1,128}$/.test(suppliedRequestId)
+      ? suppliedRequestId
+      : crypto.randomUUID();
     res.setHeader('X-Request-Id', requestId);
     res.setHeader('Cache-Control', 'no-store');
     next();
   });
   // 5 MB: company logo + employee document uploads travel as base64 JSON.
   app.use(express.json({ limit: '5mb' }));
+  app.use('/api', apiLimiter, requireJsonMutation, rejectUnsafeInput);
 
   app.get('/api/health/live', (_req, res) => res.json({ ok: true }));
   app.get('/api/health/ready', (_req, res) => {
@@ -112,6 +141,9 @@ export function createApp(): Express {
   app.use('/api/auth/login', loginLimiter);
   app.use('/api/driver/request-otp', otpRequestLimiter);
   app.use('/api/employee/request-otp', otpRequestLimiter);
+  app.use('/api/driver/verify-otp', otpVerifyLimiter);
+  app.use('/api/driver/select-company', otpVerifyLimiter);
+  app.use('/api/employee/verify-otp', otpVerifyLimiter);
   app.use('/api/auth', authRouter); // admin
   app.use('/api/platform/companies', requireRole('platform-owner'), companiesRouter);
   app.use('/api/driver', driverAuthRouter); // driver login/set/reset (public sub-paths)
